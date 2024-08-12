@@ -2,12 +2,15 @@ package chainlib
 
 import (
 	"math"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/lavanet/lava/v2/protocol/chainlib/chainproxy/rpcInterfaceMessages"
 	"github.com/lavanet/lava/v2/protocol/chainlib/chainproxy/rpcclient"
 	"github.com/lavanet/lava/v2/protocol/chainlib/extensionslib"
 	"github.com/lavanet/lava/v2/utils"
+	"github.com/lavanet/lava/v2/utils/lavaslices"
 	pairingtypes "github.com/lavanet/lava/v2/x/pairing/types"
 	spectypes "github.com/lavanet/lava/v2/x/spec/types"
 )
@@ -23,6 +26,7 @@ type updatableRPCInput interface {
 type baseChainMessageContainer struct {
 	api                    *spectypes.Api
 	latestRequestedBlock   int64
+	requestedBlocksHashes  []string
 	earliestRequestedBlock int64
 	msg                    updatableRPCInput
 	apiCollection          *spectypes.ApiCollection
@@ -37,6 +41,19 @@ type baseChainMessageContainer struct {
 	resultErrorParsingMethod func(data []byte, httpStatusCode int) (hasError bool, errorMessage string)
 }
 
+func (pm *baseChainMessageContainer) sortExtensions() {
+	if len(pm.extensions) == 0 {
+		return
+	}
+
+	sort.SliceStable(pm.extensions, func(i, j int) bool {
+		return pm.extensions[i].Name < pm.extensions[j].Name
+	})
+}
+
+func (pm *baseChainMessageContainer) GetRequestedBlocksHashes() []string {
+	return pm.requestedBlocksHashes
+}
 func (bcnc *baseChainMessageContainer) SubscriptionIdExtractor(reply *rpcclient.JsonrpcMessage) string {
 	return bcnc.msg.SubscriptionIdExtractor(reply)
 }
@@ -129,6 +146,14 @@ func (bcnc *baseChainMessageContainer) GetExtensions() []*spectypes.Extension {
 	return bcnc.extensions
 }
 
+func (pm *baseChainMessageContainer) GetConcatenatedExtensions() string {
+	extensionsNames := []string{}
+	for _, extension := range pm.extensions {
+		extensionsNames = append(extensionsNames, extension.Name)
+	}
+	return strings.Join(extensionsNames, ";")
+}
+
 // adds the following extensions
 func (bcnc *baseChainMessageContainer) OverrideExtensions(extensionNames []string, extensionParser *extensionslib.ExtensionParser) {
 	existingExtensions := map[string]struct{}{}
@@ -147,13 +172,16 @@ func (bcnc *baseChainMessageContainer) OverrideExtensions(extensionNames []strin
 			extension := extensionParser.GetExtension(extensionKey)
 			if extension != nil {
 				bcnc.extensions = append(bcnc.extensions, extension)
-				bcnc.updateCUForApi(extension)
+				bcnc.addExtensionCu(extension)
 			}
 		}
 	}
+
+	bcnc.sortExtensions()
 }
 
 func (bcnc *baseChainMessageContainer) SetExtension(extension *spectypes.Extension) {
+	// TODO: Need locks?
 	if len(bcnc.extensions) > 0 {
 		for _, ext := range bcnc.extensions {
 			if ext.Name == extension.Name {
@@ -165,13 +193,31 @@ func (bcnc *baseChainMessageContainer) SetExtension(extension *spectypes.Extensi
 	} else {
 		bcnc.extensions = []*spectypes.Extension{extension}
 	}
-	bcnc.updateCUForApi(extension)
+	bcnc.addExtensionCu(extension)
+	bcnc.sortExtensions()
 }
 
-func (bcnc *baseChainMessageContainer) updateCUForApi(extension *spectypes.Extension) {
+func (pm *baseChainMessageContainer) RemoveExtension(extensionName string) {
+	for _, ext := range pm.extensions {
+		if ext.Name == extensionName {
+			pm.extensions, _ = lavaslices.Remove(pm.extensions, ext)
+			pm.removeExtensionCu(ext)
+			break
+		}
+	}
+	pm.sortExtensions()
+}
+
+func (bcnc *baseChainMessageContainer) addExtensionCu(extension *spectypes.Extension) {
 	copyApi := *bcnc.api // we can't modify this because it points to an object inside the chainParser
 	copyApi.ComputeUnits = uint64(math.Floor(float64(extension.GetCuMultiplier()) * float64(copyApi.ComputeUnits)))
 	bcnc.api = &copyApi
+}
+
+func (pm *baseChainMessageContainer) removeExtensionCu(extension *spectypes.Extension) {
+	copyApi := *pm.api // we can't modify this because it points to an object inside the chainParser
+	copyApi.ComputeUnits = uint64(math.Floor(float64(copyApi.ComputeUnits) / float64(extension.GetCuMultiplier())))
+	pm.api = &copyApi
 }
 
 type CraftData struct {

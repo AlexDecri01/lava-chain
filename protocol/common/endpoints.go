@@ -33,6 +33,7 @@ const (
 	EXTENSION_OVERRIDE_HEADER_NAME        = "lava-extension"
 	FORCE_CACHE_REFRESH_HEADER_NAME       = "lava-force-cache-refresh"
 	LAVA_DEBUG_RELAY                      = "lava-debug-relay"
+	LAVA_EXTENSION_FORCED                 = "lava-extension-forced"
 	LAVA_LB_UNIQUE_ID_HEADER              = "lava-lb-unique-id"
 	// send http request to /lava/health to see if the process is up - (ret code 200)
 	DEFAULT_HEALTH_PATH                                       = "/lava/health"

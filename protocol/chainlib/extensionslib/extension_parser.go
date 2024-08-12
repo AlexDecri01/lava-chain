@@ -1,7 +1,12 @@
 package extensionslib
 
 import (
+	"github.com/lavanet/lava/v2/utils/maps"
 	spectypes "github.com/lavanet/lava/v2/x/spec/types"
+)
+
+const (
+	ExtensionTypeArchive = "archive"
 )
 
 type ExtensionInfo struct {
@@ -29,6 +34,23 @@ type ExtensionParserRule interface {
 type ExtensionParser struct {
 	AllowedExtensions    map[string]struct{}
 	configuredExtensions map[ExtensionKey]*spectypes.Extension
+}
+
+func (ep *ExtensionParser) GetExtensionByName(extensionName string) *spectypes.Extension {
+	if extensionName == "" {
+		return nil
+	}
+
+	findExtensionsPredicate := func(key ExtensionKey, _ *spectypes.Extension) bool {
+		return key.Extension == extensionName
+	}
+
+	_, archiveExt, found := maps.FindInMap(ep.configuredExtensions, findExtensionsPredicate)
+	if found {
+		return archiveExt
+	}
+
+	return nil
 }
 
 func (ep *ExtensionParser) GetExtension(extension ExtensionKey) *spectypes.Extension {
@@ -77,10 +99,31 @@ func (ep *ExtensionParser) ExtensionParsing(addon string, extensionsChainMessage
 
 func NewExtensionParserRule(extension *spectypes.Extension) ExtensionParserRule {
 	switch extension.Name {
-	case "archive":
+	case ExtensionTypeArchive:
 		return ArchiveParserRule{extension: extension}
 	default:
 		// unsupported rule
 		return nil
 	}
+}
+
+type EarliestOverriddenExtensionChainMessage struct {
+	earliest             int64
+	setExtensionCallback func(extension *spectypes.Extension)
+}
+
+func NewEarliestOverriddenExtensionChainMessage(earliest int64, setExtensionCallback func(extension *spectypes.Extension)) *EarliestOverriddenExtensionChainMessage {
+	return &EarliestOverriddenExtensionChainMessage{
+		earliest:             earliest,
+		setExtensionCallback: setExtensionCallback,
+	}
+}
+
+func (cm *EarliestOverriddenExtensionChainMessage) SetExtension(extension *spectypes.Extension) {
+	cm.setExtensionCallback(extension)
+}
+
+func (cm *EarliestOverriddenExtensionChainMessage) RequestedBlock() (latest int64, earliest int64) {
+	// The latest is irrelevant, we only care about the earliest
+	return spectypes.LATEST_BLOCK, cm.earliest
 }
